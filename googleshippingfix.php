@@ -31,48 +31,30 @@ class GoogleShippingFix extends Module
     $id_lang = (int)$this->context->language->id;
     $product_obj = null;
 
+    // Termék objektum lekérése
     if (isset($params['product']) && is_object($params['product'])) {
         $product_obj = new Product((int)$params['product']->id, true, $id_lang);
     } elseif (isset($params['product']['id_product'])) {
         $product_obj = new Product((int)$params['product']['id_product'], true, $id_lang);
     }
 
-    if (!Validate::isLoadedObject($product_obj)) {
-        return '';
-    }
+    if (!Validate::isLoadedObject($product_obj)) return '';
 
     $id_product = (int)$product_obj->id;
-    $currency = $this->context->currency->iso_code;
-    $country_iso = ($currency === 'RON') ? 'RO' : 'HU';
+    $currency = $this->context->currency->iso_code; // HUF vagy RON
+    $country_iso = ($currency === 'RON') ? 'RO' : 'HU'; // Célország meghatározása
 
+    // Alapadatok előkészítése
     $p_name = is_array($product_obj->name) ? $product_obj->name[$id_lang] : $product_obj->name;
     $p_desc = is_array($product_obj->description_short) ? $product_obj->description_short[$id_lang] : $product_obj->description_short;
-    if (empty($p_desc)) {
-        $p_desc = is_array($product_obj->description) ? $product_obj->description[$id_lang] : $product_obj->description;
-    }
+    if (empty($p_desc)) $p_desc = is_array($product_obj->description) ? $product_obj->description[$id_lang] : $product_obj->description;
 
     $image = Image::getCover($id_product);
     $image_url = $image ? $this->context->link->getImageLink($product_obj->link_rewrite[$id_lang] ?? $product_obj->link_rewrite, $image['id_image'], 'large_default') : "";
 
+    // Szállítási költség lekérése
     $shipping_cost = Product::getPriceStatic($id_product, true, null, 6, null, false, true, 1, false, null, null, null, $s_p, true, true, $this->context);
     if ($shipping_cost <= 0) $shipping_cost = 0;
-
-    // aggregateRating lekérése a productcomments modulból
-    $aggregateRating = null;
-    if (Module::isEnabled('productcomments')) {
-        require_once(_PS_MODULE_DIR_ . 'productcomments/ProductComment.php');
-        $average = ProductComment::getAverageGrade($id_product);
-        $count = ProductComment::getCommentNumber($id_product);
-        if ($count > 0) {
-            $aggregateRating = [
-                "@type" => "AggregateRating",
-                "ratingValue" => number_format((float)$average['grade'], 1, '.', ''),
-                "reviewCount" => (int)$count,
-                "bestRating" => "5",
-                "worstRating" => "1"
-            ];
-        }
-    }
 
     $jsonld = [
         "@context" => "https://schema.org/",
@@ -83,28 +65,18 @@ class GoogleShippingFix extends Module
         "sku" => $product_obj->reference,
         "mpn" => $product_obj->reference,
         "gtin" => $product_obj->ean13,
-        "brand" => [
-            "@type" => "Brand",
-            "name" => Manufacturer::getNameById((int)$product_obj->id_manufacturer) ?: Configuration::get('PS_SHOP_NAME')
-        ],
+        "brand" => ["@type" => "Brand", "name" => Manufacturer::getNameById((int)$product_obj->id_manufacturer) ?: Configuration::get('PS_SHOP_NAME')],
         "offers" => [
             "@type" => "Offer",
             "priceCurrency" => $currency,
             "price" => number_format((float)Product::getPriceStatic($id_product, true), 2, '.', ''),
-            "priceValidUntil" => date('Y-12-31', strtotime('+1 year')), // JAVÍTÁS: priceValidUntil hozzáadva
+            "priceValidUntil" => date('Y-12-31', strtotime('+1 year')), // Javítja a "Product snippets" hibát
             "availability" => ($product_obj->quantity > 0) ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
             "url" => $this->context->link->getProductLink($product_obj),
             "shippingDetails" => [
                 "@type" => "OfferShippingDetails",
-                "shippingRate" => [
-                    "@type" => "MonetaryAmount",
-                    "value" => number_format((float)$shipping_cost, 2, '.', ''),
-                    "currency" => $currency
-                ],
-                "shippingDestination" => [
-                    "@type" => "DefinedRegion",
-                    "addressCountry" => $country_iso
-                ],
+                "shippingRate" => ["@type" => "MonetaryAmount", "value" => number_format((float)$shipping_cost, 2, '.', ''), "currency" => $currency],
+                "shippingDestination" => ["@type" => "DefinedRegion", "addressCountry" => $country_iso],
                 "deliveryTime" => [
                     "@type" => "ShippingDeliveryTime",
                     "handlingTime" => ["@type" => "QuantitativeValue", "minValue" => 0, "maxValue" => 1, "unitCode" => "DAY"],
@@ -114,16 +86,14 @@ class GoogleShippingFix extends Module
             "hasMerchantReturnPolicy" => [
                 "@type" => "MerchantReturnPolicy",
                 "applicableCountry" => $country_iso,
-                "returnPolicyCountry" => $country_iso,
-                "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnWindow",
+                "returnPolicyCountry" => $country_iso, // Kötelező mező
+                "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnWindow", // Helyes Enum
                 "merchantReturnDays" => (int)Configuration::get('GS_RETURN_DAYS', 14),
                 "returnMethod" => "https://schema.org/ReturnByMail",
-                "returnFees" => ($currency === 'RON' ? "https://schema.org/ReturnFeesCustomerPaying" : "https://schema.org/FreeReturn") // JAVÍTÁS: Teljes URL enum
+                "returnFees" => ($currency === 'RON' ? "https://schema.org/ReturnFeesCustomerPaying" : "https://schema.org/FreeReturn") // Javítja az "Invalid enum" hibát
             ]
         ]
     ];
-
-    if ($aggregateRating) $jsonld["aggregateRating"] = $aggregateRating; //
 
     return '<script type="application/ld+json">' . json_encode($jsonld, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . '</script>';
 }
