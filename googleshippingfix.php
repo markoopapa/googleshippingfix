@@ -57,7 +57,7 @@ class GoogleShippingFix extends Module
     $shipping_cost = Product::getPriceStatic($id_product, true, null, 6, null, false, true, 1, false, null, null, null, $s_p, true, true, $this->context);
     if ($shipping_cost <= 0) $shipping_cost = 0;
 
-    // Vélemények lekérése
+    // Értékelések (aggregateRating) lekérése
     $aggregateRating = null;
     if (Module::isEnabled('productcomments')) {
         require_once(_PS_MODULE_DIR_ . 'productcomments/ProductComment.php');
@@ -113,7 +113,8 @@ class GoogleShippingFix extends Module
             "hasMerchantReturnPolicy" => [
                 "@type" => "MerchantReturnPolicy",
                 "applicableCountry" => $country_iso,
-                "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnPeriod",
+                "returnPolicyCountry" => $country_iso, // Google most már elvárja
+                "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnWindow", // Window, nem Period!
                 "merchantReturnDays" => (int)Configuration::get('GS_RETURN_DAYS', 14),
                 "returnMethod" => "https://schema.org/ReturnByMail",
                 "returnFees" => ($currency === 'RON' ? "https://schema.org/ReturnFeesCustomerPaying" : "https://schema.org/FreeReturn")
