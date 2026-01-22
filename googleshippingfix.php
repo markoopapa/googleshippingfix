@@ -43,22 +43,19 @@ class GoogleShippingFix extends Module
     $currency = $this->context->currency->iso_code;
     $country_iso = ($currency === 'RON') ? 'RO' : 'HU';
 
-    $p_name = is_array($product_obj->name) ? $product_obj->name[$id_lang] : $product_obj->name;
-    $p_desc = is_array($product_obj->description_short) ? $product_obj->description_short[$id_lang] : $product_obj->description_short;
-    if (empty($p_desc)) $p_desc = is_array($product_obj->description) ? $product_obj->description[$id_lang] : $product_obj->description;
-
-    $image = Image::getCover($id_product);
-    $image_url = $image ? $this->context->link->getImageLink($product_obj->link_rewrite[$id_lang] ?? $product_obj->link_rewrite, $image['id_image'], 'large_default') : "";
-
-    $shipping_cost = (float)Product::getPriceStatic($id_product, true, null, 6, null, false, true, 1, false, null, null, null, $s_p, true, true, $this->context);
-    if ($shipping_cost <= 0) $shipping_cost = 0;
+    // FIX: Szállítási díj meghatározása
+    // Ha a PrestaShop nem adja vissza jól, itt adj meg egy alapértelmezett értéket (pl. 1500)
+    $shipping_cost = 1500; 
+    if ($currency === 'RON') {
+        $shipping_cost = 25; // Példa román szállítási díjra
+    }
 
     $jsonld = [
         "@context" => "https://schema.org/",
         "@type" => "Product",
-        "name" => strip_tags($p_name),
-        "description" => strip_tags($p_desc),
-        "image" => $image_url,
+        "name" => strip_tags($product_obj->name[$id_lang] ?? $product_obj->name),
+        "description" => strip_tags($product_obj->description_short[$id_lang] ?? $product_obj->description_short),
+        "image" => $this->context->link->getImageLink($product_obj->link_rewrite[$id_lang] ?? $product_obj->link_rewrite, Image::getCover($id_product)['id_image'], 'large_default'),
         "sku" => $product_obj->reference,
         "mpn" => $product_obj->reference,
         "gtin" => $product_obj->ean13,
@@ -85,9 +82,9 @@ class GoogleShippingFix extends Module
                 "applicableCountry" => $country_iso,
                 "returnPolicyCountry" => $country_iso,
                 "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnWindow",
-                "merchantReturnDays" => (int)Configuration::get('GS_RETURN_DAYS', 14),
+                "merchantReturnDays" => 14,
                 "returnMethod" => "https://schema.org/ReturnByMail",
-                "returnFees" => "https://schema.org/FreeReturn" // BEÁLLÍTVA INGYENESRE
+                "returnFees" => "https://schema.org/FreeReturn"
             ]
         ]
     ];
