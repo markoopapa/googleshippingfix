@@ -9,7 +9,7 @@ class GoogleShippingFix extends Module
     {
         $this->name = 'googleshippingfix';
         $this->tab = 'seo';
-        $this->version = '1.1.1';
+        $this->version = '1.1.2';
         $this->author = 'markoo';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -27,80 +27,86 @@ class GoogleShippingFix extends Module
     }
 
     public function hookDisplayFooterProduct($params)
-{
-    $product_obj = null;
-    if (isset($params['product']) && is_object($params['product'])) {
-        $product_obj = $params['product'];
-    } elseif (isset($params['product']['id_product'])) {
-        $product_obj = new Product((int)$params['product']['id_product'], true, (int)$this->context->language->id);
-    }
+    {
+        $id_lang = (int)$this->context->language->id;
+        $product_obj = null;
 
-    if (!$product_obj) {
-        return '';
-    }
+        if (isset($params['product']) && is_object($params['product'])) {
+            $product_obj = new Product((int)$params['product']->id, true, $id_lang);
+        } elseif (isset($params['product']['id_product'])) {
+            $product_obj = new Product((int)$params['product']['id_product'], true, $id_lang);
+        }
 
-    $id_product = (int)$product_obj->id;
-    $currency = $this->context->currency->iso_code;
-    $country_iso = ($currency === 'RON') ? 'RO' : 'HU';
-    
-    // Képek lekérése
-    $images = $product_obj->getImages((int)$this->context->language->id);
-    $image_urls = [];
-    foreach ($images as $img) {
-        $image_urls[] = $this->context->link->getImageLink($product_obj->link_rewrite, $img['id_image'], 'large_default');
-    }
+        if (!Validate::isLoadedObject($product_obj)) {
+            return '';
+        }
 
-    // Szállítási díj lekérése
-    $shipping_cost = Product::getPriceStatic($id_product, true, null, 6, null, false, true);
-    if ($shipping_cost <= 0) {
-        $id_carrier = (int)Configuration::get('PS_CARRIER_DEFAULT');
-        $carrier = new Carrier($id_carrier);
-        $shipping_cost = $carrier->getDeliveryPriceByWeight(0, (int)Context::getContext()->country->id);
-    }
+        $id_product = (int)$product_obj->id;
+        $currency = $this->context->currency->iso_code;
+        $country_iso = ($currency === 'RON') ? 'RO' : 'HU';
 
-    // Teljes JSON-LD struktúra az összes kötelező mezővel
-    $jsonld = [
-        "@context" => "https://schema.org/",
-        "@type" => "Product",
-        "name" => $product_obj->name,
-        "description" => strip_tags($product_obj->description_short ?: $product_obj->description),
-        "image" => $image_urls,
-        "sku" => $product_obj->reference,
-        "mpn" => $product_obj->reference,
-        "gtin" => $product_obj->ean13,
-        "brand" => [
-            "@type" => "Brand",
-            "name" => Manufacturer::getNameById((int)$product_obj->id_manufacturer) ?: 'minmag.ro'
-        ],
-        "offers" => [
-            "@type" => "Offer",
-            "priceCurrency" => $currency,
-            "price" => number_format(Product::getPriceStatic($id_product, true), 2, '.', ''),
-            "availability" => ($product_obj->quantity > 0) ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-            "url" => $this->context->link->getProductLink($product_obj),
-            "shippingDetails" => [
-                "@type" => "OfferShippingDetails",
-                "shippingRate" => [
-                    "@type" => "MonetaryAmount",
-                    "value" => number_format($shipping_cost, 2, '.', ''),
-                    "currency" => $currency
-                ],
-                "shippingDestination" => [
-                    "@type" => "DefinedRegion",
-                    "addressCountry" => $country_iso
-                ]
+        // Név és leírás kezelése (ha tömb lenne)
+        $p_name = is_array($product_obj->name) ? $product_obj->name[$id_lang] : $product_obj->name;
+        $p_desc = is_array($product_obj->description_short) ? $product_obj->description_short[$id_lang] : $product_obj->description_short;
+        if (empty($p_desc)) {
+            $p_desc = is_array($product_obj->description) ? $product_obj->description[$id_lang] : $product_obj->description;
+        }
+
+        // Kép URL lekérése
+        $image = Image::getCover($id_product);
+        $image_url = "";
+        if ($image) {
+            $image_url = $this->context->link->getImageLink($product_obj->link_rewrite[$id_lang] ?? $product_obj->link_rewrite, $image['id_image'], 'large_default');
+        }
+
+        // Szállítási díj - egyszerűsített
+        $shipping_cost = Product::getPriceStatic($id_product, true, null, 6, null, false, true, 1, false, null, null, null, $s_p, true, true, $this->context);
+        if ($shipping_cost <= 0) {
+            $shipping_cost = 0; // Ha nem tudja kiszámolni, legyen 0, de ne omoljon össze
+        }
+
+        $jsonld = [
+            "@context" => "https://schema.org/",
+            "@type" => "Product",
+            "name" => strip_tags($p_name),
+            "description" => strip_tags($p_desc),
+            "image" => $image_url,
+            "sku" => $product_obj->reference,
+            "mpn" => $product_obj->reference,
+            "gtin" => $product_obj->ean13,
+            "brand" => [
+                "@type" => "Brand",
+                "name" => Manufacturer::getNameById((int)$product_obj->id_manufacturer) ?: Configuration::get('PS_SHOP_NAME')
             ],
-            "hasMerchantReturnPolicy" => [
-                "@type" => "MerchantReturnPolicy",
-                "applicableCountry" => $country_iso,
-                "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnPeriod",
-                "merchantReturnDays" => (int)Configuration::get('GS_RETURN_DAYS', 14),
-                "returnMethod" => "https://schema.org/ReturnByMail",
-                "returnFees" => ($currency === 'RON' ? "https://schema.org/ReturnFeesCustomerPaying" : "https://schema.org/FreeReturn")
+            "offers" => [
+                "@type" => "Offer",
+                "priceCurrency" => $currency,
+                "price" => number_format(Product::getPriceStatic($id_product, true), 2, '.', ''),
+                "availability" => ($product_obj->quantity > 0) ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+                "url" => $this->context->link->getProductLink($product_obj),
+                "shippingDetails" => [
+                    "@type" => "OfferShippingDetails",
+                    "shippingRate" => [
+                        "@type" => "MonetaryAmount",
+                        "value" => number_format((float)$shipping_cost, 2, '.', ''),
+                        "currency" => $currency
+                    ],
+                    "shippingDestination" => [
+                        "@type" => "DefinedRegion",
+                        "addressCountry" => $country_iso
+                    ]
+                ],
+                "hasMerchantReturnPolicy" => [
+                    "@type" => "MerchantReturnPolicy",
+                    "applicableCountry" => $country_iso,
+                    "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnPeriod",
+                    "merchantReturnDays" => (int)Configuration::get('GS_RETURN_DAYS', 14),
+                    "returnMethod" => "https://schema.org/ReturnByMail",
+                    "returnFees" => ($currency === 'RON' ? "https://schema.org/ReturnFeesCustomerPaying" : "https://schema.org/FreeReturn")
+                ]
             ]
-        ]
-    ];
+        ];
 
-    return '<script type="application/ld+json">' . json_encode($jsonld, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . '</script>';
-}
+        return '<script type="application/ld+json">' . json_encode($jsonld, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . '</script>';
+    }
 }
