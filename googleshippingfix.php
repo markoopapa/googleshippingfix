@@ -45,42 +45,32 @@ class GoogleShippingFix extends Module
     $currency = $this->context->currency->iso_code;
     $country_iso = ($currency === 'RON') ? 'RO' : 'HU';
 
-    // Termék adatok előkészítése
     $p_name = is_array($product_obj->name) ? $product_obj->name[$id_lang] : $product_obj->name;
     $p_desc = is_array($product_obj->description_short) ? $product_obj->description_short[$id_lang] : $product_obj->description_short;
     if (empty($p_desc)) {
         $p_desc = is_array($product_obj->description) ? $product_obj->description[$id_lang] : $product_obj->description;
     }
 
-    // Kategória lekérése (hogy még pontosabb legyen)
-    $category = new Category((int)$product_obj->id_category_default, $id_lang);
-
     $image = Image::getCover($id_product);
     $image_url = $image ? $this->context->link->getImageLink($product_obj->link_rewrite[$id_lang] ?? $product_obj->link_rewrite, $image['id_image'], 'large_default') : "";
 
-    // Szállítási költség lekérése
     $shipping_cost = Product::getPriceStatic($id_product, true, null, 6, null, false, true, 1, false, null, null, null, $s_p, true, true, $this->context);
-    if ($shipping_cost <= 0) {
-        $shipping_cost = 0;
-    }
+    if ($shipping_cost <= 0) $shipping_cost = 0;
 
-    // --- ÉRTÉKELÉSEK LEKÉRÉSE ---
+    // Vélemények lekérése
     $aggregateRating = null;
     if (Module::isEnabled('productcomments')) {
-        if (file_exists(_PS_MODULE_DIR_ . 'productcomments/ProductComment.php')) {
-            require_once(_PS_MODULE_DIR_ . 'productcomments/ProductComment.php');
-            $average = ProductComment::getAverageGrade($id_product);
-            $count = ProductComment::getCommentNumber($id_product);
-            
-            if ($count > 0) {
-                $aggregateRating = [
-                    "@type" => "AggregateRating",
-                    "ratingValue" => number_format((float)$average['grade'], 1, '.', ''),
-                    "reviewCount" => (int)$count,
-                    "bestRating" => "5",
-                    "worstRating" => "1"
-                ];
-            }
+        require_once(_PS_MODULE_DIR_ . 'productcomments/ProductComment.php');
+        $average = ProductComment::getAverageGrade($id_product);
+        $count = ProductComment::getCommentNumber($id_product);
+        if ($count > 0) {
+            $aggregateRating = [
+                "@type" => "AggregateRating",
+                "ratingValue" => number_format((float)$average['grade'], 1, '.', ''),
+                "reviewCount" => (int)$count,
+                "bestRating" => "5",
+                "worstRating" => "1"
+            ];
         }
     }
 
@@ -89,7 +79,6 @@ class GoogleShippingFix extends Module
         "@type" => "Product",
         "name" => strip_tags($p_name),
         "description" => strip_tags($p_desc),
-        "category" => Validate::isLoadedObject($category) ? $category->name : "",
         "image" => $image_url,
         "sku" => $product_obj->reference,
         "mpn" => $product_obj->reference,
@@ -117,34 +106,22 @@ class GoogleShippingFix extends Module
                 ],
                 "deliveryTime" => [
                     "@type" => "ShippingDeliveryTime",
-                    "handlingTime" => [
-                        "@type" => "QuantitativeValue",
-                        "minValue" => 0,
-                        "maxValue" => 1,
-                        "unitCode" => "DAY"
-                    ],
-                    "transitTime" => [
-                        "@type" => "QuantitativeValue",
-                        "minValue" => 1,
-                        "maxValue" => 3,
-                        "unitCode" => "DAY"
-                    ]
+                    "handlingTime" => ["@type" => "QuantitativeValue", "minValue" => 0, "maxValue" => 1, "unitCode" => "DAY"],
+                    "transitTime" => ["@type" => "QuantitativeValue", "minValue" => 1, "maxValue" => 3, "unitCode" => "DAY"]
                 ]
             ],
             "hasMerchantReturnPolicy" => [
                 "@type" => "MerchantReturnPolicy",
                 "applicableCountry" => $country_iso,
-                "returnPolicyCategory" => "MerchantReturnFiniteReturnPeriod", // URL NÉLKÜL
+                "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnPeriod",
                 "merchantReturnDays" => (int)Configuration::get('GS_RETURN_DAYS', 14),
-                "returnMethod" => "ReturnByMail", // URL NÉLKÜL
-                "returnFees" => ($currency === 'RON' ? "ReturnFeesCustomerPaying" : "FreeReturn") // URL NÉLKÜL
+                "returnMethod" => "https://schema.org/ReturnByMail",
+                "returnFees" => ($currency === 'RON' ? "https://schema.org/ReturnFeesCustomerPaying" : "https://schema.org/FreeReturn")
             ]
         ]
     ];
 
-    if ($aggregateRating) {
-        $jsonld["aggregateRating"] = $aggregateRating;
-    }
+    if ($aggregateRating) $jsonld["aggregateRating"] = $aggregateRating;
 
     return '<script type="application/ld+json">' . json_encode($jsonld, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . '</script>';
 }
