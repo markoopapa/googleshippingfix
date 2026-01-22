@@ -78,7 +78,7 @@ class GoogleShippingFix extends Module
         "offers" => [
             "@type" => "Offer",
             "priceCurrency" => $currency,
-            "price" => number_format(Product::getPriceStatic($id_product, true), 2, '.', ''),
+            "price" => number_format((float)Product::getPriceStatic($id_product, true), 2, '.', ''),
             "availability" => ($product_obj->quantity > 0) ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
             "url" => $this->context->link->getProductLink($product_obj),
             "shippingDetails" => [
@@ -94,17 +94,17 @@ class GoogleShippingFix extends Module
                 ],
                 "deliveryTime" => [
                     "@type" => "ShippingDeliveryTime",
-                    "handlingTime": [
-                        "@type": "QuantitativeValue",
-                        "minValue": 0,
-                        "maxValue": 1,
-                        "unitCode": "DAY"
+                    "handlingTime" => [
+                        "@type" => "QuantitativeValue",
+                        "minValue" => 0,
+                        "maxValue" => 1,
+                        "unitCode" => "DAY"
                     ],
-                    "transitTime": [
-                        "@type": "QuantitativeValue",
-                        "minValue": 1,
-                        "maxValue": 3,
-                        "unitCode": "DAY"
+                    "transitTime" => [
+                        "@type" => "QuantitativeValue",
+                        "minValue" => 1,
+                        "maxValue" => 3,
+                        "unitCode" => "DAY"
                     ]
                 ]
             ],
