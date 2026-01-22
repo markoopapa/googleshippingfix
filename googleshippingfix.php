@@ -31,40 +31,28 @@ class GoogleShippingFix extends Module
     $id_lang = (int)$this->context->language->id;
     $product_obj = null;
 
-    // Termék lekérése biztonságosan
     if (isset($params['product']) && is_object($params['product'])) {
         $product_obj = new Product((int)$params['product']->id, true, $id_lang);
     } elseif (isset($params['product']['id_product'])) {
         $product_obj = new Product((int)$params['product']['id_product'], true, $id_lang);
     }
 
-    if (!Validate::isLoadedObject($product_obj)) {
-        return '';
-    }
+    if (!Validate::isLoadedObject($product_obj)) return '';
 
     $id_product = (int)$product_obj->id;
     $currency = $this->context->currency->iso_code;
     $country_iso = ($currency === 'RON') ? 'RO' : 'HU';
 
-    // Adatok tisztítása
     $p_name = is_array($product_obj->name) ? $product_obj->name[$id_lang] : $product_obj->name;
     $p_desc = is_array($product_obj->description_short) ? $product_obj->description_short[$id_lang] : $product_obj->description_short;
-    if (empty($p_desc)) {
-        $p_desc = is_array($product_obj->description) ? $product_obj->description[$id_lang] : $product_obj->description;
-    }
+    if (empty($p_desc)) $p_desc = is_array($product_obj->description) ? $product_obj->description[$id_lang] : $product_obj->description;
 
     $image = Image::getCover($id_product);
     $image_url = $image ? $this->context->link->getImageLink($product_obj->link_rewrite[$id_lang] ?? $product_obj->link_rewrite, $image['id_image'], 'large_default') : "";
 
-    // Ár és szállítás
-    $price = (float)Product::getPriceStatic($id_product, true);
     $shipping_cost = (float)Product::getPriceStatic($id_product, true, null, 6, null, false, true, 1, false, null, null, null, $s_p, true, true, $this->context);
     if ($shipping_cost <= 0) $shipping_cost = 0;
 
-    // Érvényességi dátum (következő év vége)
-    $validUntil = date('Y-12-31', strtotime('+1 year'));
-
-    // JSON-LD tömb összeállítása (TISZTA PHP SZINTAXIS)
     $jsonld = [
         "@context" => "https://schema.org/",
         "@type" => "Product",
@@ -74,42 +62,22 @@ class GoogleShippingFix extends Module
         "sku" => $product_obj->reference,
         "mpn" => $product_obj->reference,
         "gtin" => $product_obj->ean13,
-        "brand" => [
-            "@type" => "Brand",
-            "name" => Manufacturer::getNameById((int)$product_obj->id_manufacturer) ?: Configuration::get('PS_SHOP_NAME')
-        ],
+        "brand" => ["@type" => "Brand", "name" => Manufacturer::getNameById((int)$product_obj->id_manufacturer) ?: Configuration::get('PS_SHOP_NAME')],
         "offers" => [
             "@type" => "Offer",
             "priceCurrency" => $currency,
-            "price" => number_format($price, 2, '.', ''),
-            "priceValidUntil" => $validUntil,
+            "price" => number_format((float)Product::getPriceStatic($id_product, true), 2, '.', ''),
+            "priceValidUntil" => "2026-12-31",
             "availability" => ($product_obj->quantity > 0) ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
             "url" => $this->context->link->getProductLink($product_obj),
             "shippingDetails" => [
                 "@type" => "OfferShippingDetails",
-                "shippingRate" => [
-                    "@type" => "MonetaryAmount",
-                    "value" => number_format($shipping_cost, 2, '.', ''),
-                    "currency" => $currency
-                ],
-                "shippingDestination" => [
-                    "@type" => "DefinedRegion",
-                    "addressCountry" => $country_iso
-                ],
+                "shippingRate" => ["@type" => "MonetaryAmount", "value" => number_format($shipping_cost, 2, '.', ''), "currency" => $currency],
+                "shippingDestination" => ["@type" => "DefinedRegion", "addressCountry" => $country_iso],
                 "deliveryTime" => [
                     "@type" => "ShippingDeliveryTime",
-                    "handlingTime" => [
-                        "@type" => "QuantitativeValue",
-                        "minValue" => 0,
-                        "maxValue" => 1,
-                        "unitCode" => "DAY"
-                    ],
-                    "transitTime" => [
-                        "@type" => "QuantitativeValue",
-                        "minValue" => 1,
-                        "maxValue" => 3,
-                        "unitCode" => "DAY"
-                    ]
+                    "handlingTime" => ["@type" => "QuantitativeValue", "minValue" => 0, "maxValue" => 1, "unitCode" => "DAY"],
+                    "transitTime" => ["@type" => "QuantitativeValue", "minValue" => 1, "maxValue" => 3, "unitCode" => "DAY"]
                 ]
             ],
             "hasMerchantReturnPolicy" => [
@@ -119,7 +87,7 @@ class GoogleShippingFix extends Module
                 "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnWindow",
                 "merchantReturnDays" => (int)Configuration::get('GS_RETURN_DAYS', 14),
                 "returnMethod" => "https://schema.org/ReturnByMail",
-                "returnFees" => ($currency === 'RON' ? "https://schema.org/ReturnFeesCustomerPaying" : "https://schema.org/FreeReturn")
+                "returnFees" => "https://schema.org/FreeReturn" // BEÁLLÍTVA INGYENESRE
             ]
         ]
     ];
