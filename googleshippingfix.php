@@ -9,7 +9,7 @@ class GoogleShippingFix extends Module
     {
         $this->name = 'googleshippingfix';
         $this->tab = 'seo';
-        $this->version = '1.1.0';
+        $this->version = '1.1.1';
         $this->author = 'markoo';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -17,100 +17,74 @@ class GoogleShippingFix extends Module
         parent::__construct();
 
         $this->displayName = $this->l('Google Merchant Shipping & Return Fix');
-        $this->description = $this->l('Automatikusan javítja a szállítási és visszaküldési Schema adatokat a Google számára.');
+        $this->description = $this->l('Javítja a szállítási és visszaküldési adatokat (HUF/RON).');
     }
 
     public function install()
     {
-        // Alapértelmezett értékek mentése telepítéskor
         Configuration::updateValue('GS_RETURN_DAYS', 14);
         return parent::install() && $this->registerHook('displayFooterProduct');
     }
 
-    // Admin felület a beállításokhoz
-    public function getContent()
+    public function hookDisplayFooterProduct($params)
     {
-        if (Tools::isSubmit('submit' . $this->name)) {
-            Configuration::updateValue('GS_RETURN_DAYS', (int)Tools::getValue('GS_RETURN_DAYS'));
-            $this->context->smarty->assign('confirmation', 'Beállítások elmentve!');
+        // Hibatűrő adatlekérés: megnézzük, hogy objektum vagy tömb-e a termék
+        $product_obj = null;
+        if (isset($params['product']) && is_object($params['product'])) {
+            $product_obj = $params['product'];
+        } elseif (isset($params['product']['id_product'])) {
+            $product_obj = new Product((int)$params['product']['id_product'], true, (int)$this->context->language->id);
         }
 
-        return $this->renderForm();
-    }
+        if (!$product_obj) {
+            return '';
+        }
 
-    protected function renderForm()
-    {
-        $fields_form = [
-            'form' => [
-                'legend' => ['title' => 'Beállítások', 'icon' => 'icon-cogs'],
-                'input' => [
-                    [
-                        'type' => 'text',
-                        'label' => 'Visszaküldési határidő (nap)',
-                        'name' => 'GS_RETURN_DAYS',
-                        'desc' => 'Hány napig küldheti vissza a vásárló a terméket? (Pl. 14)',
+        $currency = $this->context->currency->iso_code;
+        $country_iso = ($currency === 'RON') ? 'RO' : 'HU';
+
+        // Szállítási díj egyszerűsített lekérése
+        $id_product = (int)$product_obj->id;
+        $shipping_cost = Product::getPriceStatic($id_product, true, null, 6, null, false, true);
+
+        // Ha nincs egyedi szállítási díj, az alapértelmezett szállító árát vesszük
+        if ($shipping_cost <= 0) {
+            $id_carrier = (int)Configuration::get('PS_CARRIER_DEFAULT');
+            $carrier = new Carrier($id_carrier);
+            $shipping_cost = $carrier->getDeliveryPriceByWeight(0, (int)Context::getContext()->country->id);
+        }
+
+        $jsonld = [
+            "@context" => "https://schema.org/",
+            "@type" => "Product",
+            "name" => is_object($product_obj) ? $product_obj->name : $params['product']['name'],
+            "offers" => [
+                "@type" => "Offer",
+                "priceCurrency" => $currency,
+                "price" => number_format(Product::getPriceStatic($id_product, true), 2, '.', ''),
+                "shippingDetails" => [
+                    "@type" => "OfferShippingDetails",
+                    "shippingRate" => [
+                        "@type" => "MonetaryAmount",
+                        "value" => number_format($shipping_cost, 2, '.', ''),
+                        "currency" => $currency
                     ],
+                    "shippingDestination" => [
+                        "@type" => "DefinedRegion",
+                        "addressCountry" => $country_iso
+                    ]
                 ],
-                'submit' => ['title' => 'Mentés', 'class' => 'btn btn-default pull-right']
-            ],
+                "hasMerchantReturnPolicy" => [
+                    "@type" => "MerchantReturnPolicy",
+                    "applicableCountry" => $country_iso,
+                    "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnPeriod",
+                    "merchantReturnDays" => (int)Configuration::get('GS_RETURN_DAYS', 14),
+                    "returnMethod" => "https://schema.org/ReturnByMail",
+                    "returnFees" => "https://schema.org/ReturnFeesCustomerPaying"
+                ]
+            ]
         ];
 
-        $helper = new HelperForm();
-        $helper->currentIndex = $this->context->link->getAdminLink('AdminModules', false) . '&configure=' . $this->name;
-        $helper->token = Tools::getAdminTokenLite('AdminModules');
-        $helper->fields_value['GS_RETURN_DAYS'] = Configuration::get('GS_RETURN_DAYS');
-        return $helper->generateForm([$fields_form]);
+        return '<script type="application/ld+json">' . json_encode($jsonld, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . '</script>';
     }
-
-    public function hookDisplayFooterProduct($params)
-{
-    $product = $params['product'];
-    $currency = $this->context->currency->iso_code;
-    
-    // Dinamikus országmeghatározás a valuta alapján
-    $country_iso = ($currency === 'RON') ? 'RO' : 'HU';
-    
-    // Szállítási díj lekérése az aktuális pénznemben
-    $shipping_cost = $product->getPriceStatic((int)$product->id, true, null, 6, null, false, true, 1, false, null, null, null, $specific_prices, true, true, $this->context, true);
-
-    if ($shipping_cost <= 0) {
-        $id_carrier = (int)Configuration::get('PS_CARRIER_DEFAULT');
-        $carrier = new Carrier($id_carrier);
-        // Itt a PrestaShop a zóna alapú árat fogja visszaadni az aktuális valuta szerint
-        $shipping_cost = $carrier->getDeliveryPriceByWeight(0, (int)Context::getContext()->country->id);
-    }
-
-    $jsonld = [
-        "@context" => "https://schema.org/",
-        "@type" => "Product",
-        "name" => $product->name,
-        "offers" => [
-            "@type" => "Offer",
-            "priceCurrency" => $currency,
-            "price" => number_format($product->getPrice(true), 2, '.', ''),
-            "shippingDetails" => [
-                "@type" => "OfferShippingDetails",
-                "shippingRate" => [
-                    "@type" => "MonetaryAmount",
-                    "value" => number_format($shipping_cost, 2, '.', ''),
-                    "currency" => $currency
-                ],
-                "shippingDestination" => [
-                    "@type" => "DefinedRegion",
-                    "addressCountry" => $country_iso // Most már dinamikus: HU vagy RO
-                ]
-            ],
-            "hasMerchantReturnPolicy" => [
-                "@type" => "MerchantReturnPolicy",
-                "applicableCountry" => $country_iso, // Dinamikus
-                "returnPolicyCategory" => "https://schema.org/MerchantReturnFiniteReturnPeriod",
-                "merchantReturnDays" => (int)Configuration::get('GS_RETURN_DAYS'),
-                "returnMethod" => "https://schema.org/ReturnByMail",
-                "returnFees" => "https://schema.org/ReturnFeesCustomerPaying"
-            ]
-        ]
-    ];
-
-    return '<script type="application/ld+json">' . json_encode($jsonld, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . '</script>';
-}
 }
