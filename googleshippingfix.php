@@ -43,23 +43,39 @@ class GoogleShippingFix extends Module
     $currency = $this->context->currency->iso_code;
     $country_iso = ($currency === 'RON') ? 'RO' : 'HU';
 
-    // FIX: Szállítási díj meghatározása
-    // Ha a PrestaShop nem adja vissza jól, itt adj meg egy alapértelmezett értéket (pl. 1500)
-    $shipping_cost = 1500; 
-    if ($currency === 'RON') {
-        $shipping_cost = 25; // Példa román szállítási díjra
+    // JAVÍTÁS: Név és leírás kinyerése kényszerített nyelvvel
+    $p_name = $product_obj->name;
+    if (is_array($p_name)) {
+        $p_name = isset($p_name[$id_lang]) ? $p_name[$id_lang] : reset($p_name);
     }
+
+    $p_desc = $product_obj->description_short;
+    if (is_array($p_desc)) {
+        $p_desc = isset($p_desc[$id_lang]) ? $p_desc[$id_lang] : reset($p_desc);
+    }
+    if (empty(strip_tags($p_desc))) {
+        $p_desc = is_array($product_obj->description) ? (isset($product_obj->description[$id_lang]) ? $product_obj->description[$id_lang] : reset($product_obj->description)) : $product_obj->description;
+    }
+
+    $image = Image::getCover($id_product);
+    $image_url = $image ? $this->context->link->getImageLink($product_obj->link_rewrite[$id_lang] ?? $product_obj->link_rewrite, $image['id_image'], 'large_default') : "";
+
+    // FIX: Szállítási díj (itt írd át az összeget, ha nem 1500)
+    $shipping_cost = ($currency === 'RON') ? 25.00 : 1500.00;
 
     $jsonld = [
         "@context" => "https://schema.org/",
         "@type" => "Product",
-        "name" => strip_tags($product_obj->name[$id_lang] ?? $product_obj->name),
-        "description" => strip_tags($product_obj->description_short[$id_lang] ?? $product_obj->description_short),
-        "image" => $this->context->link->getImageLink($product_obj->link_rewrite[$id_lang] ?? $product_obj->link_rewrite, Image::getCover($id_product)['id_image'], 'large_default'),
+        "name" => strip_tags($p_name),
+        "description" => strip_tags($p_desc),
+        "image" => $image_url,
         "sku" => $product_obj->reference,
         "mpn" => $product_obj->reference,
         "gtin" => $product_obj->ean13,
-        "brand" => ["@type" => "Brand", "name" => Manufacturer::getNameById((int)$product_obj->id_manufacturer) ?: Configuration::get('PS_SHOP_NAME')],
+        "brand" => [
+            "@type" => "Brand", 
+            "name" => Manufacturer::getNameById((int)$product_obj->id_manufacturer) ?: Configuration::get('PS_SHOP_NAME')
+        ],
         "offers" => [
             "@type" => "Offer",
             "priceCurrency" => $currency,
@@ -69,8 +85,15 @@ class GoogleShippingFix extends Module
             "url" => $this->context->link->getProductLink($product_obj),
             "shippingDetails" => [
                 "@type" => "OfferShippingDetails",
-                "shippingRate" => ["@type" => "MonetaryAmount", "value" => number_format($shipping_cost, 2, '.', ''), "currency" => $currency],
-                "shippingDestination" => ["@type" => "DefinedRegion", "addressCountry" => $country_iso],
+                "shippingRate" => [
+                    "@type" => "MonetaryAmount", 
+                    "value" => number_format($shipping_cost, 2, '.', ''), 
+                    "currency" => $currency
+                ],
+                "shippingDestination" => [
+                    "@type" => "DefinedRegion", 
+                    "addressCountry" => $country_iso
+                ],
                 "deliveryTime" => [
                     "@type" => "ShippingDeliveryTime",
                     "handlingTime" => ["@type" => "QuantitativeValue", "minValue" => 0, "maxValue" => 1, "unitCode" => "DAY"],
